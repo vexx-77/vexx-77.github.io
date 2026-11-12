@@ -109,7 +109,7 @@
       animation-delay: 0.65s;
     }
 
-    /* Анимация ухода растянута для плавности под 1.9 секунды */
+    /* Анимация ухода */
     .container.leaving .avatar-anim { animation: fadeOutUp 1.1s ease forwards 0s; }
     .container.leaving .title { animation: fadeOutUp 1.1s ease forwards 0.15s; }
     .container.leaving .link-btn:nth-child(1) { animation: fadeOutUp 1.1s ease forwards 0.3s; }
@@ -117,6 +117,17 @@
     .container.leaving .link-btn:nth-child(3) { animation: fadeOutUp 1.1s ease forwards 0.6s; }
     .container.leaving .link-btn:nth-child(4) { animation: fadeOutUp 1.1s ease forwards 0.75s; }
     .container.leaving .subtitle { animation: fadeOutUp 1.1s ease forwards 0.9s; }
+
+    /* Класс для предотвращения двойной анимации при возвращении на страницу */
+    .container.no-anim .avatar-anim,
+    .container.no-anim .title,
+    .container.no-anim .link-btn,
+    .container.no-anim .subtitle {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+      filter: none !important;
+    }
 
     .avatar-wrapper {
       position: relative;
@@ -405,8 +416,13 @@
 
     const canvas = document.getElementById('particles-canvas');
     const ctx = canvas.getContext('2d');
+    const container = document.getElementById('container');
+    
     let particles = [];
     let isLeaving = false;
+    let isAnimating = false;
+    let lineOpacity = 1;
+    const maxDistance = 130; // Радиус, в котором частицы соединяются линиями
 
     function resizeCanvas() {
       canvas.width = window.innerWidth;
@@ -475,33 +491,88 @@
 
     function animateParticles() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      particles.forEach(p => {
-        p.update();
-        p.draw();
-      });
+      
+      // Обновляем позиции частиц
+      particles.forEach(p => p.update());
+
+      // Логика прозрачности линий (плавное исчезновение при клике)
+      if (isLeaving) {
+        lineOpacity -= 0.05;
+      } else {
+        lineOpacity += 0.02;
+      }
+      lineOpacity = Math.max(0, Math.min(1, lineOpacity));
+
+      // Рисуем паутинку (линии между точками)
+      if (lineOpacity > 0) {
+        for (let i = 0; i < particles.length; i++) {
+          for (let j = i + 1; j < particles.length; j++) {
+            const dx = particles[i].x - particles[j].x;
+            const dy = particles[i].y - particles[j].y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < maxDistance) {
+              // Чем ближе точки, тем ярче линия
+              const alpha = (1 - distance / maxDistance) * 0.2 * lineOpacity;
+              if (alpha > 0.01) {
+                ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(particles[i].x, particles[i].y);
+                ctx.lineTo(particles[j].x, particles[j].y);
+                ctx.stroke();
+              }
+            }
+          }
+        }
+      }
+
+      // Рисуем сами точки (поверх линий)
+      particles.forEach(p => p.draw());
+      
       requestAnimationFrame(animateParticles);
     }
     animateParticles();
 
-    // Переходы по ссылкам
-    const container = document.getElementById('container');
+    // Обработка кликов по кнопкам
     document.querySelectorAll('.link-btn').forEach(btn => {
       btn.addEventListener('click', function(e) {
         e.preventDefault();
+        
+        if (isAnimating) return; // Защита от дабл-клика
+        isAnimating = true;
+        
         const href = this.getAttribute('href');
         const target = this.getAttribute('target');
         
         container.classList.add('leaving');
+        container.style.pointerEvents = 'none'; // Блокируем клики во время анимации
         isLeaving = true;
         
         particles.forEach(p => p.frame = 0);
 
+        // Переход ровно через 1900 мс (1.9 секунды)
         setTimeout(() => {
           if (target === '_blank') {
             window.open(href, '_blank');
+            
+            // Фикс бага "двойного ухода": убираем класс анимации ухода и 
+            // накладываем no-anim, чтобы элементы мгновенно вернулись на место без анимации появления
             container.classList.remove('leaving');
-            isLeaving = false;
-            particles.forEach(p => p.reset());
+            container.classList.add('no-anim');
+            
+            void container.offsetWidth; // Форсируем пересчет стилей
+            
+            container.style.pointerEvents = 'auto'; // Возвращаем кликабельность
+            
+            // Возвращаем все в исходное состояние через долю секунды
+            setTimeout(() => {
+              container.classList.remove('no-anim');
+              isAnimating = false;
+              isLeaving = false;
+              particles.forEach(p => p.reset());
+            }, 50);
+            
           } else {
             window.location.href = href;
           }
